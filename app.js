@@ -5,7 +5,12 @@ var cookieParser = require('cookie-parser');
 var logger = require('morgan');
 const expressLayouts = require('express-ejs-layouts');
 var dotenv = require('dotenv');
+const flash = require('connect-flash');
+const session = require('express-session');
+
 dotenv.config();
+
+
 var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
 
@@ -35,6 +40,27 @@ app.listen(PORT, console.log('Server started on port ${PORT}'))
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
   next(createError(404));
+});
+
+// Express session
+app.use(
+  session({
+    secret: 'secret',
+    resave: true,
+    saveUninitialized: true
+  })
+);
+
+// Connect flash
+app.use(flash());
+
+
+// Global variables
+app.use(function(req, res, next) {
+  res.locals.success_msg = req.flash('success_msg');
+  res.locals.error_msg = req.flash('error_msg');
+  res.locals.error = req.flash('error');
+  next();
 });
 
 // error handler

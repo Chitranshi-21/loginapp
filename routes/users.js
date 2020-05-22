@@ -1,7 +1,7 @@
 var express = require('express');
 var router = express.Router();
 const pool = require('../db/dbConfig');
-
+const jwt = require('jsonwebtoken');
 
 /*Get Contacts List */ 
 router.get('/contactList',(request, response) => {
@@ -15,6 +15,7 @@ router.get('/contactList',(request, response) => {
   .catch((contactQueryError)=>{
   response.send(contactQueryError);
   })
+
   
   });
 
@@ -51,42 +52,106 @@ router.get('/login',(request, response) => {
 })
 
 
-router.post('/loginPost',(request, response) => {
-  pool
-  .query('SELECT sfid, Email, password__c FROM salesforce.Contact')
-  .then((contactQueryResult) => {
-  console.log('contactQueryResult : '+JSON.stringify(contactQueryResult.rows));
-  response.send(contactQueryResult.rows);
-  })
-  .catch((contactQueryError)=>{
-  response.send(contactQueryError);
-  })
-  let body = request.body;
-  console.log('Your Response body is :    '+JSON.stringify(body));
+router.post('/loginPost',async (request, response) => {
   
+  const {email, password} = request.body;
+  console.log('email : '+email+' passoword '+password);
 
-  response.send('Hello  '+body.email);
+  let errors = [], userId, objUser, isUserExist = false;
+
+  if (!email || !password) {
+    errors.push({ msg: 'Please enter all fields' });
+    response.render('login',{errors});
+  }
+
+   await
+   pool
+   .query('SELECT Id, sfid,name, email FROM salesforce.Contact WHERE email = $1 AND password__c = $2',[email,password])
+  .then((loginResult) => {
+    console.log('loginResult.rows[0]  '+JSON.stringify(loginResult.rows[0]));
+        if(loginResult.rowCount > 0 )
+        {
+          userId = loginResult.rows[0].sfid;
+          objUser = loginResult.rows[0];
+         // isUserExist = true;
+          if(errors.length == 0){
+            const token = jwt.sign({ user : objUser }, process.env.TOKEN_SECRET, {
+              expiresIn: 8640000 // expires in 24 hours
+            });
+              response.cookie('jwt',token, { httpOnly: false, secure: false, maxAge: 3600000 });
+              response.header('auth-token', token).render('dashboard.ejs',{objUser}); 
+          }
+          else
+          {
+           response.render('login',{errors});
+          }
+       
+       }})
+        .catch((loginError) =>{
+         console.log('loginError   :  '+loginError.stack);
+          isUserExist = false;
+          });
+  
+        });
+
+        //chatter.ejs
+
+        router.get('/chatter',(request, response) => {
+          response.render('chatter.ejs');
+        }) 
+      router.post('/postchatter',async (request,response) => {
+          let body = request.body;
+          let { name, content} = request.body;
+          let errors =[];
+          await
+          pool
+            .query('INSERT into salesforce.post__c(name, Description__c ) values ($1, $2)',[name,content])
+            .then((postQueryResult) => {
+            console.log('postQueryResult : '+JSON.stringify(postQueryResult));
+            })
+            .catch((postQueryResult)=>{
+            console.log('postQueryResult  : '+postQueryResult);  
+            });
+
+            await
+           pool
+           .query('SELECT Id, sfid,name, Description__c FROM salesforce.post__c')
+           .then((postResult) => {
+        
+           if(postResult.rowCount > 0 )
+           {
+             userId = postResult.rows[0].sfid;
+             objPost = postResult.rows[0];
+             console.log('postResult : '+JSON.stringify(postResult.rows));
+                 response.render('chatter2.ejs',{objPost}); 
+             }
+             else
+             {
+              response.render('chatter',{errors});
+             }
+           })
+           .catch((postResult)=>{
+           response.send(postResult);
+           })
+                
+                })
+                 
+           
+
+//dashboard
+router.get('/dash', function(req, res) {
+  res.render('dashboard.ejs');
 })
+//Register Page
+router.get('/register', function(req, res) {
+  res.render('register.ejs');
+});
 
-  //Register Page
-  router.get('/register', function(req, res) {
-    res.render('register.ejs');
-  });
- // Registration
- 
-    router.post('/InsertPost',(request, response) => {
+// Registration
+router.post('/register',(request, response) => {
       let body = request.body;
       let {firstName, lastName, email, password, password2} = request.body;
       let errors =[];
-      pool
-      .query('SELECT sfid, name, Email FROM salesforce.Contact')
-      .then((contactQueryResult) => {
-      console.log('contactQueryResult : '+JSON.stringify(contactQueryResult.rows));
-      response.send(contactQueryResult.rows);
-      })
-      .catch((contactQueryError)=>{
-      response.send(contactQueryError);
-      })
       //Check Required Fields
 
       if(!firstName || !lastName || !email || !password || !password2) {
@@ -103,22 +168,49 @@ router.post('/loginPost',(request, response) => {
         errors.push({ msg: 'Passwords should be atleast 6 character'});
       }
      
-      let email2 = pool.email
 
-      if(email == email2)
+      if(errors.length > 0)
       {
-        errors.push({ msg: 'This Email id already Registered'});
-      }
-      if(errors.length >0) {
-        response.render('register', { errors});
-         
+        response.render('register',{errors});
       }
       else
       {
-        console.log('firstName : '+firstName+' lastName : '+lastName+' email : '+email+ 'password :' +password);
-      console.log('Your Response body is :    '+JSON.stringify(body));
 
-      pool
+        pool
+        .query('SELECT id, sfid, Name, Email FROM salesforce.Contact WHERE email = $1 ',[email])
+        .then((contactQueryResult)=>{
+          console.log('contactQueryResult.rows : '+JSON.stringify(contactQueryResult.rows));
+          if(contactQueryResult.rowCount > 0)
+          {
+            errors.push({ msg: 'This email already exists'});
+            response.render('register',{errors}); 
+          }
+          else
+          {
+                  pool
+                  .query('INSERT into salesforce.Contact(firstname, lastname ,email, password__c) values ($1, $2, $3, $4)',[firstName,lastName,email,password])
+                  .then((contactInsertQueryResult)=>{
+                    console.log('contactQueryResult.rows : '+JSON.stringify(contactInsertQueryResult));
+                      /******* Successfully  Inserted*/
+                      response.redirect('/users/login');
+                  })
+                  .catch((contactInsertQueryError)=> {
+                    console.log('contactInsertQueryError '+contactInsertQueryError);
+                    response.render('register.ejs');
+                  })
+          }
+        })
+        .catch((contactQueryError)=> {
+          console.log('contactQueryError '+contactQueryError);
+          response.render('register.ejs');
+        })
+
+       
+      }
+
+          
+
+/*      pool
       .query('INSERT into salesforce.Contact(firstname, lastname ,email, password__c) values ($1, $2, $3, $4)',[firstName,lastName,email,password])
       .then((contactQueryResult) => {
       console.log('contactQueryResult : '+JSON.stringify(contactQueryResult));
@@ -128,11 +220,9 @@ router.post('/loginPost',(request, response) => {
       console.log('contactQueryError  : '+contactQueryError);  
       response.render(login.ejs);
       });
-      }
+      */
       
-      
-    }
-    )
+})
   
     
 module.exports = router

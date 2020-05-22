@@ -5,8 +5,8 @@
         <h1 class="text-center mb-3">
           <i class="fas fa-user-plus"></i> Register
         </h1>
-      
-        <form action="/users/InsertPost" method="post">
+        <% include ./partials/messages.ejs %>
+        <form action="/users/register" method="post">
 
           <div class="form-group">
               <label for="firstName">First Name</label>
